@@ -1,12 +1,12 @@
 {-# LANGUAGE TemplateHaskell #-}
 module GHC.Check (checkGhcVersion, compileTimeVersion, runTimeVersion) where
 
-import GHC
-import GHC.Check.Internal
-import Language.Haskell.TH
-import Language.Haskell.TH.Syntax (lift)
-import Data.Version (Version)
-import GHC.Exts (toList, IsList(fromList))
+import           Data.Version               (Version)
+import           GHC
+import           GHC.Check.Internal
+import           GHC.Exts                   (IsList (fromList), toList)
+import           Language.Haskell.TH
+import           Language.Haskell.TH.Syntax (lift)
 
 -- | Returns the compile-time version of the 'ghc' package
 compileTimeVersion :: Version
