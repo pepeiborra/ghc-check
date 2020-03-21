@@ -33,24 +33,24 @@ getPackageVersion packageName = runMaybeT $ do
     p <- MaybeT $ return $ lookupInstalledPackage dflags (componentIdToInstalledUnitId component)
     return $ packageVersion p
 
-getGHCVersion :: Ghc (Maybe Version)
-getGHCVersion = getPackageVersion "ghc"
+getGhcVersion :: Ghc (Maybe Version)
+getGhcVersion = getPackageVersion "ghc"
 
-getGHCVersionIO :: FilePath -> IO Version
-getGHCVersionIO libdir = runGhc (Just libdir) $ do
+getGhcVersionIO :: FilePath -> IO Version
+getGhcVersionIO libdir = runGhc (Just libdir) $ do
     dflags <- getSessionDynFlags
     _ <- setSessionDynFlags dflags
-    ghcV <- getGHCVersion
+    ghcV <- getGhcVersion
     case ghcV of
         Just v  -> return v
         Nothing -> error "Cannot get version of ghc package"
 
 -- | Returns the compile-time version of the 'ghc' package given the GHC libdir
-compileTimeVersionFromLibDir :: IO FilePath -> TExpQ Version
-compileTimeVersionFromLibDir getLibdir = do
+compileTimeVersionFromLibdir :: IO FilePath -> TExpQ Version
+compileTimeVersionFromLibdir getLibdir = do
     ver <- runIO $ do
         libdir <- getLibdir
-        v <- getGHCVersionIO libdir
+        v <- getGhcVersionIO libdir
         return (toList v)
     verLifted <- TH.lift (toList ver)
     [|| fromList $$(pure $ TExp verLifted) ||]
