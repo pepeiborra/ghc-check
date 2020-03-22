@@ -2,27 +2,23 @@
 {-# LANGUAGE TemplateHaskell #-}
 module GHC.Check.Internal where
 
-import           Control.Applicative
-import           Control.Monad             (join)
 import           Control.Monad.Trans.Class as Monad (MonadTrans (lift))
 import           Data.Maybe                (fromMaybe)
 import           Data.String               (IsString (fromString))
-import           Data.Version              (Version, makeVersion)
+import           Data.Version              (Version)
 import           GHC
 import           GHC.Exts                   (IsList (fromList), toList)
-import           GHC.Paths
+import qualified GHC.Paths
 import           Language.Haskell.TH
 import           Language.Haskell.TH.Syntax as TH (TExp(TExp), lift)
 import           Maybes                    (MaybeT (MaybeT), runMaybeT)
 import           Module                    (componentIdToInstalledUnitId)
 import           PackageConfig             (PackageName (PackageName))
-import           Packages                  (initPackages,
-                                            lookupInstalledPackage,
-                                            lookupPackage, lookupPackageName)
+import           Packages                  (lookupInstalledPackage, lookupPackageName)
 import           Packages                  (InstalledPackageInfo (packageVersion))
 import           System.Environment        (lookupEnv)
 
--- Set the GHC libdir to the nix libdir if it's present.
+-- | Look up the GHC lib dir in the NIX environment, then in the 'GHC.Paths'
 guessLibdir :: IO FilePath
 guessLibdir = fromMaybe GHC.Paths.libdir <$> lookupEnv "NIX_GHC_LIBDIR"
 

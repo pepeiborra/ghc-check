@@ -11,7 +11,8 @@ import           Data.Version               (Version)
 import           GHC
 import           GHC.Check.Internal
 
--- | Returns the compile-time version of the 'ghc' package
+-- | Returns the compile-time version of the 'ghc' package.
+--   Uses 'guessLibdir' to find the GHC lib dir
 compileTimeVersion :: Version
 compileTimeVersion = $$(compileTimeVersionFromLibdir guessLibdir)
 
