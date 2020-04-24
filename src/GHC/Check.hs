@@ -3,7 +3,7 @@ module GHC.Check
 ( VersionCheck(..)
 , checkGhcVersion
 , compileTimeVersion
-, compileTimeVersionFromLibdir
+, ghcCompileTimeVersion
 , runTimeVersion
 ) where
 
@@ -11,12 +11,12 @@ import           Data.Version               (Version)
 import           GHC
 import           GHC.Check.Internal
 
--- | Returns the compile-time version of the 'ghc' package.
+-- | Returns the compile-time version of the @ghc@ package.
 --   Uses 'guessLibdir' to find the GHC lib dir
-compileTimeVersion :: Version
-compileTimeVersion = $$(compileTimeVersionFromLibdir guessLibdir)
+ghcCompileTimeVersion :: Version
+ghcCompileTimeVersion = $$(compileTimeVersion guessLibdir "ghc")
 
--- | Returns the run-time version of the 'ghc' package by looking up in the package database
+-- | Returns the run-time version of the @ghc@ package in the package database
 runTimeVersion :: Ghc (Maybe Version)
 runTimeVersion = getGhcVersion
 
@@ -27,11 +27,11 @@ data VersionCheck
                }
     deriving (Eq, Show)
 
--- | Returns 'True' if the run-time version of the 'ghc' package matches the compile-time version
---   For using your own GHC libdir at compile time, inline this logic in your program
+-- | Checks if the run-time version of the @ghc@ package matches the compile-time version.
+--   To be able to specify a custom libdir, inline this logic in your program.
 checkGhcVersion :: Ghc VersionCheck
 checkGhcVersion = do
     v <- getGhcVersion
-    return $ if v == Just compileTimeVersion
+    return $ if v == Just ghcCompileTimeVersion
         then GHC.Check.Match
-        else Mismatch compileTimeVersion v
+        else Mismatch ghcCompileTimeVersion v

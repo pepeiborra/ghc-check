@@ -22,6 +22,8 @@ import           System.Environment        (lookupEnv)
 guessLibdir :: IO FilePath
 guessLibdir = fromMaybe GHC.Paths.libdir <$> lookupEnv "NIX_GHC_LIBDIR"
 
+-- | @getPackageVersion p@ returns the version of package @p@ in
+--     the package database
 getPackageVersion :: String -> Ghc (Maybe Version)
 getPackageVersion packageName = runMaybeT $ do
     dflags <- Monad.lift getSessionDynFlags
@@ -29,24 +31,33 @@ getPackageVersion packageName = runMaybeT $ do
     p <- MaybeT $ return $ lookupInstalledPackage dflags (componentIdToInstalledUnitId component)
     return $ packageVersion p
 
+-- | Returns the version of the @ghc@ package in the environment package database
 getGhcVersion :: Ghc (Maybe Version)
 getGhcVersion = getPackageVersion "ghc"
 
-getGhcVersionIO :: FilePath -> IO Version
-getGhcVersionIO libdir = runGhc (Just libdir) $ do
+-- | @getPackageVersionIO ghc-libdir p@ returns the version of package @p@
+--   in the default package database
+getPackageVersionIO :: FilePath -> String -> IO Version
+getPackageVersionIO libdir package = runGhc (Just libdir) $ do
+    -- initialize the Ghc session
+    -- there's probably a beteter way to do this.
     dflags <- getSessionDynFlags
     _ <- setSessionDynFlags dflags
-    ghcV <- getGhcVersion
-    case ghcV of
-        Just v  -> return v
-        Nothing -> error "Cannot get version of ghc package"
 
--- | Returns the compile-time version of the 'ghc' package given the GHC libdir
-compileTimeVersionFromLibdir :: IO FilePath -> TExpQ Version
-compileTimeVersionFromLibdir getLibdir = do
+    ver <- getPackageVersion package
+    case ver of
+        Just v  ->
+            return v
+        Nothing ->
+            error $ "Cannot find " <> package <> " in the package database at " <> libdir
+
+-- | @compileTimeVersion get-libdir p@ returns the version of package @p@ in
+--   the compile-time package database.
+compileTimeVersion :: IO FilePath -> String -> TExpQ Version
+compileTimeVersion getLibdir package = do
     ver <- runIO $ do
         libdir <- getLibdir
-        v <- getGhcVersionIO libdir
+        v <- getPackageVersionIO libdir package
         return (toList v)
     verLifted <- TH.lift (toList ver)
     [|| fromList $$(pure $ TExp verLifted) ||]
