@@ -3,6 +3,7 @@
 module GHC.Check
 ( VersionCheck(..)
 , makeGhcVersionChecker
+, checkGhcVersion
 ) where
 
 import           Control.Exception
