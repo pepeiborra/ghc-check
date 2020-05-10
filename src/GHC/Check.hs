@@ -15,6 +15,9 @@ import           GHC.Check.PackageDb  (getPackageVersionIO)
 import           GHC.Check.Util       (liftVersion, guessLibdir)
 import           Language.Haskell.TH
 import           Language.Haskell.TH.Syntax
+import Control.Monad (filterM)
+import System.Directory (doesFileExist)
+import qualified Data.List.NonEmpty as NonEmpty
 
 data VersionCheck
     = Match
@@ -25,15 +28,18 @@ data VersionCheck
     deriving (Eq, Show)
 
 -- | A GHC version retrieved from the ghc executable
-ghcRunTimeVersion :: IO Version
-ghcRunTimeVersion = do
-    libdir <- guessLibdir
-    getGhcVersion (guessExecutablePathFromLibdir libdir)
+ghcRunTimeVersion :: String -> IO Version
+ghcRunTimeVersion libdir = do
+    let guesses = guessExecutablePathFromLibdir libdir
+    validGuesses <- filterM doesFileExist $ NonEmpty.toList guesses
+    case validGuesses of
+        firstGuess:_ -> getGhcVersion firstGuess
+        [] -> fail $ "Unable to find the GHC executable for libdir: " <> libdir
 
 -- | Checks if the run-time version of the @ghc@ package matches the given version.
-checkGhcVersion :: Version -> IO VersionCheck
-checkGhcVersion expectedVersion = handleErrors $ do
-    v <- ghcRunTimeVersion
+checkGhcVersion :: String -> Version -> IO VersionCheck
+checkGhcVersion libdir expectedVersion = handleErrors $ do
+    v <- ghcRunTimeVersion libdir
     return $ if v == expectedVersion
                 then GHC.Check.Match
                 else Mismatch expectedVersion v
@@ -47,8 +53,8 @@ checkGhcVersion expectedVersion = handleErrors $ do
 --   version of ghc against the compile-time version.
 makeGhcVersionChecker :: IO (Maybe FilePath) -> TExpQ (IO VersionCheck)
 makeGhcVersionChecker getLibdir = do
+    libdir <- runIO $ maybe guessLibdir return =<< getLibdir
     compileTimeVersion <- runIO $ do
-        libdir <- maybe guessLibdir return =<< getLibdir
         mbVersion <- getPackageVersionIO libdir "ghc"
         return $ fromMaybe (error "unreachable - the ghc package is a Cabal dependency") mbVersion
-    [|| checkGhcVersion $$(liftVersion compileTimeVersion) ||]
+    [|| checkGhcVersion libdir $$(liftVersion compileTimeVersion) ||]

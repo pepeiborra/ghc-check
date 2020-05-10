@@ -10,6 +10,9 @@ import System.Process
 import Text.ParserCombinators.ReadP
 import Data.Char (isSpace)
 import Data.List (dropWhileEnd)
+import Data.List.NonEmpty (NonEmpty)
+import qualified Data.List.NonEmpty as NonEmpty
+
 
 -- | Takes a path to the GHC binary to query.
 --   Throws if anything goes wrong.
@@ -23,5 +26,9 @@ getGhcVersion fp = do
 trim :: String -> String
 trim = dropWhileEnd isSpace . dropWhile isSpace
 
-guessExecutablePathFromLibdir :: FilePath -> FilePath
-guessExecutablePathFromLibdir fp = fp </> "bin" </> "ghc"
+-- | Returns a list of possible paths for the GHC executable
+guessExecutablePathFromLibdir :: FilePath -> NonEmpty FilePath
+guessExecutablePathFromLibdir fp = NonEmpty.fromList
+    [ fp </> "bin" </> "ghc"               -- Linux
+    , fp </> ".." </> "bin" </> "ghc.exe"  -- Windows
+    ]
