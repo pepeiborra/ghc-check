@@ -49,8 +49,17 @@ checkGhcVersion expectedVersion libdir = handleErrors $ do
             ,Handler (pure . Failure . show @SomeException)
             ]
 
--- | @makeGhcVersionChecker libdir@ returns a computation to check the run-time
---   version of ghc against the compile-time version.
+-- | @makeGhcVersionChecker libdir@ returns a function to check the run-time
+--   version of ghc against the compile-time version, given the run-time GHC libdir.
+--
+--    > ghcVersionChecker :: FilePath -> IO VersionCheck
+--    > ghcVersionChecker = $$(makeGhcVersionChecker (pure $ Just GHC.Paths.libdir))
+--    >
+--    > checkGhcVersion :: IO ()
+--    > checkGhcVersion = do
+--    >     res <- ghcVersionChecker GHC.Paths.libdir
+--    >     print res
+--
 makeGhcVersionChecker :: IO (Maybe FilePath) -> TExpQ (FilePath -> IO VersionCheck)
 makeGhcVersionChecker getLibdir = do
     libdir <- runIO $ maybe guessLibdir return =<< getLibdir
