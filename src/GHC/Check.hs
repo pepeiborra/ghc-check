@@ -37,8 +37,8 @@ ghcRunTimeVersion libdir = do
         [] -> fail $ "Unable to find the GHC executable for libdir: " <> libdir
 
 -- | Checks if the run-time version of the @ghc@ package matches the given version.
-checkGhcVersion :: String -> Version -> IO VersionCheck
-checkGhcVersion libdir expectedVersion = handleErrors $ do
+checkGhcVersion :: Version -> String -> IO VersionCheck
+checkGhcVersion expectedVersion libdir = handleErrors $ do
     v <- ghcRunTimeVersion libdir
     return $ if v == expectedVersion
                 then GHC.Check.Match
@@ -49,12 +49,21 @@ checkGhcVersion libdir expectedVersion = handleErrors $ do
             ,Handler (pure . Failure . show @SomeException)
             ]
 
--- | @makeGhcVersionChecker libdir@ returns a computation to check the run-time
---   version of ghc against the compile-time version.
-makeGhcVersionChecker :: IO (Maybe FilePath) -> TExpQ (IO VersionCheck)
+-- | @makeGhcVersionChecker libdir@ returns a function to check the run-time
+--   version of ghc against the compile-time version, given the run-time GHC libdir.
+--
+--    > ghcVersionChecker :: FilePath -> IO VersionCheck
+--    > ghcVersionChecker = $$(makeGhcVersionChecker (pure $ Just GHC.Paths.libdir))
+--    >
+--    > checkGhcVersion :: IO ()
+--    > checkGhcVersion = do
+--    >     res <- ghcVersionChecker GHC.Paths.libdir
+--    >     print res
+--
+makeGhcVersionChecker :: IO (Maybe FilePath) -> TExpQ (FilePath -> IO VersionCheck)
 makeGhcVersionChecker getLibdir = do
     libdir <- runIO $ maybe guessLibdir return =<< getLibdir
     compileTimeVersion <- runIO $ do
         mbVersion <- getPackageVersionIO libdir "ghc"
         return $ fromMaybe (error "unreachable - the ghc package is a Cabal dependency") mbVersion
-    [|| checkGhcVersion libdir $$(liftVersion compileTimeVersion) ||]
+    [|| checkGhcVersion $$(liftVersion compileTimeVersion) ||]
