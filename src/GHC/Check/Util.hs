@@ -1,6 +1,7 @@
-{-# LANGUAGE TemplateHaskell #-}
-module GHC.Check.Util where
-
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE CPP, TemplateHaskell #-}
+module GHC.Check.Util (MyVersion(..), liftTyped) where
 
 import           Data.Maybe
 import           Data.Version
@@ -10,11 +11,22 @@ import           Language.Haskell.TH
 import           Language.Haskell.TH.Syntax as TH
 import           System.Environment (lookupEnv)
 
--- | Look up the GHC lib dir in the NIX environment, then in the 'GHC.Paths'
-guessLibdir :: IO FilePath
-guessLibdir = fromMaybe GHC.Paths.libdir <$> lookupEnv "NIX_GHC_LIBDIR"
+-- | A wrapper around 'Version' with TH lifting
+newtype MyVersion = MyVersion Version
+  deriving (Eq, IsList, Show)
 
-liftVersion :: Version -> TExpQ Version
-liftVersion ver = do
+instance Lift MyVersion where
+#if MIN_VERSION_template_haskell(2,16,0)
+    liftTyped = liftMyVersion
+#endif
+    lift = unTypeQ . liftMyVersion
+
+liftMyVersion :: MyVersion -> TExpQ MyVersion
+liftMyVersion ver = do
     verLifted <- TH.lift (toList ver)
     [|| fromList $$(pure $ TExp verLifted) ||]
+
+#if !MIN_VERSION_template_haskell(2,16,0)
+liftTyped :: Lift a => a -> TExpQ a
+liftTyped = unsafeTExpCoerce . lift
+#endif
