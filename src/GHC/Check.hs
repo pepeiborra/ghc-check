@@ -49,10 +49,10 @@ data PackageMismatch
 comparePackageVersions :: PackageVersion -> PackageVersion -> Maybe PackageMismatch
 comparePackageVersions compile run
   | compile == run = Nothing
-  | abi compile == abi run =
-    Just $ VersionMismatch (version compile) (version run)
-  | otherwise =
+  | version compile == version run =
     Just $ AbiMismatch (abi compile) (abi run)
+  | otherwise =
+    Just $ VersionMismatch (version compile) (version run)
 
 collectPackageVersions :: [String] -> Ghc [(String, PackageVersion)]
 collectPackageVersions =
