@@ -15,7 +15,7 @@ module GHC.Check
 where
 
 import Control.Exception
-import Control.Monad (filterM)
+import Control.Monad (unless, filterM)
 import Data.Function (on)
 import Data.List (intersectBy)
 import qualified Data.List.NonEmpty as NonEmpty
@@ -29,15 +29,24 @@ import GHC.Check.PackageDb (PackageVersion (..), getPackageVersion, version)
 import GHC.Check.Util (liftTyped)
 import Language.Haskell.TH (TExpQ, runIO)
 import Language.Haskell.TH.Syntax (Lift (lift))
-import System.Directory (doesFileExist)
+import System.Directory (doesDirectoryExist, doesFileExist)
 
 -- | Given a run-time libdir, checks the ghc installation and returns
 --   a 'Ghc' action to check the package database
 type GhcVersionChecker = String -> IO InstallationCheck
 
 data InstallationCheck
-  = InstallationChecked (Ghc PackageCheck)
-  | InstallationMismatch { compileTime, runTime :: !Version}
+  = InstallationChecked
+  { compileTime :: !Version
+    -- ^ The compile time version of ghc
+  , packageCheck :: Ghc PackageCheck
+    -- ^ The second stage of the ghc version check
+  }
+  -- ^ The ghc installation looks fine. Further checks are needed for the package libraries.
+  | InstallationMismatch { libdir :: !String, compileTime, runTime :: !Version}
+  -- ^ The libdir points to a different ghc version
+  | InstallationNotFound { libdir :: !String }
+  -- ^ The libdir does not exist
 
 type PackageCheck = Maybe (String, PackageMismatch)
 
@@ -49,7 +58,7 @@ data PackageMismatch
 comparePackageVersions :: PackageVersion -> PackageVersion -> Maybe PackageMismatch
 comparePackageVersions compile run
   | compile == run = Nothing
-  | version compile == version run =
+  | version compile ==  version run =
     Just $ AbiMismatch (abi compile) (abi run)
   | otherwise =
     Just $ VersionMismatch (version compile) (version run)
@@ -67,24 +76,29 @@ checkGhcVersion trackedPackages compileTimeVersions runTimeLibdir = do
   let compileTimeVersionsMap = Map.fromList compileTimeVersions
       compileTime = version $ compileTimeVersionsMap Map.! "ghc"
 
-  runTime <- ghcRunTimeVersion runTimeLibdir
+  exists <- doesDirectoryExist runTimeLibdir
 
-  return $ if runTime /= compileTime
-    then InstallationMismatch{..}
-    else InstallationChecked $ do
-      runTimeVersions <- collectPackageVersions trackedPackages
-      let compares =
-            Map.intersectionWith
-              comparePackageVersions
-              compileTimeVersionsMap
-              (Map.fromList runTimeVersions)
-          mismatches = Map.mapMaybe id compares
+  if not exists
+    then return $ InstallationNotFound runTimeLibdir
+    else do
+      runTime <- ghcRunTimeVersion runTimeLibdir
 
-      return
-        $ getFirst
-        $ foldMap
-          (\p -> First $ (p,) <$> Map.lookup p mismatches)
-          trackedPackages
+      return $ if runTime /= compileTime
+        then InstallationMismatch{libdir = runTimeLibdir, ..}
+        else InstallationChecked compileTime $ do
+          runTimeVersions <- collectPackageVersions trackedPackages
+          let compares =
+                Map.intersectionWith
+                  comparePackageVersions
+                  compileTimeVersionsMap
+                  (Map.fromList runTimeVersions)
+              mismatches = Map.mapMaybe id compares
+
+          return
+            $ getFirst
+            $ foldMap
+              (\p -> First $ (p,) <$> Map.lookup p mismatches)
+              trackedPackages
 
 -- | @makeGhcVersionChecker libdir@ returns a function to check the run-time
 --   version of ghc against the compile-time version. It performs two checks:
@@ -109,6 +123,10 @@ checkGhcVersion trackedPackages compileTimeVersions runTimeLibdir = do
 makeGhcVersionChecker :: IO FilePath -> TExpQ GhcVersionChecker
 makeGhcVersionChecker getLibdir = do
   libdir <- runIO getLibdir
+  libdirExists <- runIO $ doesDirectoryExist libdir
+  unless libdirExists $
+    error $ "I could not find a ghc installation at " <> libdir <>
+            ". Please do a clean rebuild and/or reinstall ghc."
   compileTimeVersions <-
     runIO
       $ runGhcPkg libdir
