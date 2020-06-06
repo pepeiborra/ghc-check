@@ -25,6 +25,7 @@ library
                        ghc,
                        ghc-paths,
                        process,
+                       safe-exceptions,
                        template-haskell,
                        transformers
   hs-source-dirs:      src

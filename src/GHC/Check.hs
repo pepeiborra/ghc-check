@@ -1,32 +1,43 @@
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
 
 module GHC.Check
-  ( GhcVersionChecker,
-    InstallationCheck(..),
-    PackageCheck,
-    PackageMismatch (..),
+  ( -- * GHC version check
     makeGhcVersionChecker,
+    GhcVersionChecker,
+    InstallationCheck (..),
+    PackageCheckResult (..),
+    PackageCheck (..),
+
+    -- ** Interpreting the results
+    guessCompatibility,
+    CompatibilityGuess (..),
+    NotCompatibleReason(..),
+
+    -- ** Exports for TH
     checkGhcVersion,
   )
 where
 
+import Control.Applicative (Alternative ((<|>)))
 import Control.Exception
-import Control.Monad (unless, filterM)
+import Control.Monad (filterM, unless)
 import Data.Function (on)
-import Data.List (intersectBy)
+import Data.List (find, intersectBy)
 import qualified Data.List.NonEmpty as NonEmpty
+import Data.List.NonEmpty (NonEmpty, nonEmpty)
 import qualified Data.Map.Strict as Map
 import Data.Maybe
 import Data.Monoid (First (First), getFirst)
-import Data.Version (Version)
+import Data.Version (Version, showVersion)
 import GHC (Ghc, getSessionDynFlags, runGhc, setSessionDynFlags)
 import GHC.Check.Executable (getGhcVersion, guessExecutablePathFromLibdir)
 import GHC.Check.PackageDb (PackageVersion (..), getPackageVersion, version)
-import GHC.Check.Util (liftTyped)
+import GHC.Check.Util (gcatchSafe, liftTyped)
 import Language.Haskell.TH (TExpQ, runIO)
 import Language.Haskell.TH.Syntax (Lift (lift))
 import System.Directory (doesDirectoryExist, doesFileExist)
@@ -36,32 +47,47 @@ import System.Directory (doesDirectoryExist, doesFileExist)
 type GhcVersionChecker = String -> IO InstallationCheck
 
 data InstallationCheck
-  = InstallationChecked
-  { compileTime :: !Version
-    -- ^ The compile time version of ghc
-  , packageCheck :: Ghc PackageCheck
-    -- ^ The second stage of the ghc version check
-  }
-  -- ^ The ghc installation looks fine. Further checks are needed for the package libraries.
-  | InstallationMismatch { libdir :: !String, compileTime, runTime :: !Version}
-  -- ^ The libdir points to a different ghc version
-  | InstallationNotFound { libdir :: !String }
-  -- ^ The libdir does not exist
+  = -- | The GHC installation looks fine. Further checks are needed for the package libraries.
+    InstallationChecked
+      { -- | The compile time version of GHC
+        compileTime :: !Version,
+        -- | The second stage of the GHC version check
+        packageCheck :: Ghc PackageCheckResult
+      }
+  | -- | The libdir points to a different GHC version
+    InstallationMismatch {libdir :: !String, compileTime, runTime :: !Version}
+  | -- | The libdir does not exist
+    InstallationNotFound {libdir :: !String}
 
-type PackageCheck = Maybe (String, PackageMismatch)
+data PackageCheckResult
+  = -- | All the compile time packages tested match
+    PackageCheckSuccess !(NonEmpty (String, PackageCheck))
+  | -- | Found package mismatches
+    PackageCheckFailure !(NonEmpty (String, PackageCheck))
+  | -- | None of the compile time packages could be found
+    PackageCheckInconclusive ![String]
+    -- | An exception arised during the package check
+  | PackageCheckError !SomeException
 
-data PackageMismatch
-  = VersionMismatch { compileTime, runTime :: !Version }
-  | AbiMismatch { compileTimeAbi, runTimeAbi :: !String }
+data PackageCheck
+  = VersionMismatch {compileTime, runTime :: !Version}
+    -- ^ Different versions
+  | AbiMismatch {compileTimeAbi, runTimeAbi :: !String, compileTime :: !Version}
+    -- ^ Same version but different abi
+  | VersionMatch {packageVersion :: !PackageVersion}
+    -- ^ Same version and abi
   deriving (Eq, Show)
 
-comparePackageVersions :: PackageVersion -> PackageVersion -> Maybe PackageMismatch
+isPackageCheckFailure VersionMatch {} = False
+isPackageCheckFailure _ = True
+
+comparePackageVersions :: PackageVersion -> PackageVersion -> PackageCheck
 comparePackageVersions compile run
-  | compile == run = Nothing
-  | version compile ==  version run =
-    Just $ AbiMismatch (abi compile) (abi run)
+  | compile == run = VersionMatch compile
+  | version compile == version run =
+    AbiMismatch (abi compile) (abi run) (version compile)
   | otherwise =
-    Just $ VersionMismatch (version compile) (version run)
+    VersionMismatch (version compile) (version run)
 
 collectPackageVersions :: [String] -> Ghc [(String, PackageVersion)]
 collectPackageVersions =
@@ -69,10 +95,9 @@ collectPackageVersions =
 
 -- | Checks if the run-time version of the @ghc@ package matches the given version.
 checkGhcVersion ::
-  [String] ->
   [(String, PackageVersion)] ->
   GhcVersionChecker
-checkGhcVersion trackedPackages compileTimeVersions runTimeLibdir = do
+checkGhcVersion compileTimeVersions runTimeLibdir = do
   let compileTimeVersionsMap = Map.fromList compileTimeVersions
       compileTime = version $ compileTimeVersionsMap Map.! "ghc"
 
@@ -83,55 +108,56 @@ checkGhcVersion trackedPackages compileTimeVersions runTimeLibdir = do
     else do
       runTime <- ghcRunTimeVersion runTimeLibdir
 
-      return $ if runTime /= compileTime
-        then InstallationMismatch{libdir = runTimeLibdir, ..}
-        else InstallationChecked compileTime $ do
-          runTimeVersions <- collectPackageVersions trackedPackages
-          let compares =
-                Map.intersectionWith
-                  comparePackageVersions
-                  compileTimeVersionsMap
-                  (Map.fromList runTimeVersions)
-              mismatches = Map.mapMaybe id compares
+      return $
+        if runTime /= compileTime
+          then InstallationMismatch {libdir = runTimeLibdir, ..}
+          else InstallationChecked compileTime
+            $ flip gcatchSafe (pure . PackageCheckError)
+            $ do
+              runTimeVersions <- collectPackageVersions (map fst compileTimeVersions)
+              let compares =
+                    Map.intersectionWith
+                      comparePackageVersions
+                      compileTimeVersionsMap
+                      (Map.fromList runTimeVersions)
+                  failure = PackageCheckFailure <$> nonEmpty (Map.toList $ Map.filter isPackageCheckFailure compares)
+                  success = PackageCheckSuccess <$> nonEmpty (Map.toList compares)
+                  inconclusive = PackageCheckInconclusive (map fst compileTimeVersions)
 
-          return
-            $ getFirst
-            $ foldMap
-              (\p -> First $ (p,) <$> Map.lookup p mismatches)
-              trackedPackages
+              return $ fromMaybe inconclusive (failure <|> success)
 
 -- | @makeGhcVersionChecker libdir@ returns a function to check the run-time
---   version of ghc against the compile-time version. It performs two checks:
+--   version of GHC against the compile-time version. It performs two checks:
 --
---     1. It checks the version of the ghc installation given the run-time libdir
+--     1. It checks the version of the GHC installation given the run-time libdir
 --        In some platforms, like Nix, the libdir is not fixed at compile-time
 --
---     2. It compares the version of the 'ghc' package, if found at run-time.
---        If not, it compares the 'abi' of the 'base' package.
+--     2. It compares the version of the @ghc@ package, if found at run-time.
+--        If not, it compares the abi of the @base@ package.
 --
 --    > ghcChecker :: IO(Ghc (String -> PackageCheck))
 --    > ghcChecker = $$(makeGhcVersionChecker (pure $ Just GHC.Paths.libdir))
 --    >
 --    > checkGhcVersion :: IO ()
 --    > checkGhcVersion = do
---    >     InstallationChecked ghcLibVersionChecker <- ghcChecker runTimeLibdir
+--    >     InstallationChecked packageCheck <- ghcChecker runTimeLibdir
 --    >     res <- runGhc (Just runTimeLibdir) $ do
 --    >              setupGhcApi
---    >              Right Nothing <- gtry ghcLibVersionChecker
---    >              doSomethingInteresting
-
+--    >              result <- packageCheck
+--    >              case guessCompatibility result of ...
 makeGhcVersionChecker :: IO FilePath -> TExpQ GhcVersionChecker
 makeGhcVersionChecker getLibdir = do
   libdir <- runIO getLibdir
   libdirExists <- runIO $ doesDirectoryExist libdir
-  unless libdirExists $
-    error $ "I could not find a ghc installation at " <> libdir <>
-            ". Please do a clean rebuild and/or reinstall ghc."
+  unless libdirExists
+    $ error
+    $ "I could not find a GHC installation at " <> libdir
+      <> ". Please do a clean rebuild and/or reinstall GHC."
   compileTimeVersions <-
     runIO
       $ runGhcPkg libdir
       $ collectPackageVersions trackedPackages
-  [||checkGhcVersion trackedPackages $$(liftTyped compileTimeVersions)||]
+  [||checkGhcVersion $$(liftTyped compileTimeVersions)||]
   where
     trackedPackages = ["ghc", "base"]
 
@@ -143,11 +169,77 @@ runGhcPkg libdir action = runGhc (Just libdir) $ do
   _ <- setSessionDynFlags dflags
   action
 
--- | A GHC version retrieved from the ghc installation in the given libdir
+-- | A GHC version retrieved from the GHC installation in the given libdir
 ghcRunTimeVersion :: String -> IO Version
 ghcRunTimeVersion libdir = do
-    let guesses = guessExecutablePathFromLibdir libdir
-    validGuesses <- filterM doesFileExist $ NonEmpty.toList guesses
-    case validGuesses of
-        firstGuess:_ -> getGhcVersion firstGuess
-        [] -> fail $ "Unable to find the GHC executable for libdir: " <> libdir
+  let guesses = guessExecutablePathFromLibdir libdir
+  validGuesses <- filterM doesFileExist $ NonEmpty.toList guesses
+  case validGuesses of
+    firstGuess : _ -> getGhcVersion firstGuess
+    [] -> fail $ "Unable to find the GHC executable for libdir: " <> libdir
+
+--------------------------------------------------------------------------------
+
+-- | The result of interpreting a 'PackageCheckResult'
+data CompatibilityGuess
+  = ProbablyCompatible {warning :: Maybe String}
+  | NotCompatible {reason :: !NotCompatibleReason}
+  deriving Eq
+
+data NotCompatibleReason
+  = PackageVersionMismatch
+      { compileTime :: !Version,
+        runTime :: !Version,
+        packageName :: !String
+      }
+  | BasePackageAbiMismatch
+      { compileTimeAbi :: !String,
+        runTimeAbi :: !String,
+        compileTime :: !Version
+      }
+  deriving Eq
+
+-- | Interpret a 'PackageCheckResult' into a yes/no GHC compatibility answer
+guessCompatibility :: PackageCheckResult -> CompatibilityGuess
+guessCompatibility result = case result of
+  PackageCheckFailure evidence
+    | Just problem <- findInterestingProblem evidence -> do
+      case problem of
+        (packageName, VersionMismatch {..}) ->
+          NotCompatible PackageVersionMismatch {..}
+        ("base", AbiMismatch {..}) ->
+          NotCompatible BasePackageAbiMismatch {..}
+        (_, VersionMatch {}) ->
+          ProbablyCompatible Nothing
+    | otherwise ->
+      ProbablyCompatible Nothing
+  PackageCheckInconclusive attempts ->
+    ProbablyCompatible $ Just $
+      "unable to validate GHC version. Could not find any run-time packages to test: "
+        <> show attempts
+  PackageCheckError err ->
+    ProbablyCompatible $ Just $ "Warning: unable to validate GHC version: " <> show err
+  PackageCheckSuccess !_evidence ->
+    ProbablyCompatible Nothing
+
+findInterestingProblem :: NonEmpty (String, PackageCheck) -> Maybe (String, PackageCheck)
+findInterestingProblem evidence = find isInterestingProblem evidence
+  where
+    ghcVersionMatches = any isGhcVersionMatchEvidence evidence
+    isInterestingProblem (_, VersionMismatch {}) = True
+    isInterestingProblem (_, AbiMismatch {}) =
+      -- The package version matches, but the abi does not.
+      -- This can happen if we have been built by:
+      --   1) a different version of ghc, or
+      --   2) a different build tool
+      -- We tolerate only if there is evidence that it's not case 1
+      not ghcVersionMatches
+
+    isInterestingProblem _ = False
+    isGhcVersionMatchEvidence ("ghc", VersionMatch {}) = True
+    isGhcVersionMatchEvidence ("ghc", AbiMismatch {}) =
+      -- We assume that an abi mismatch implies a version match,
+      -- otherwise the library would have reported version mismatch
+      -- rather than abi mismatch.
+      True
+    isGhcVersionMatchEvidence _ = False

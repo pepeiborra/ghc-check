@@ -1,10 +1,15 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE CPP, TemplateHaskell #-}
-module GHC.Check.Util (MyVersion(..), liftTyped) where
+module GHC.Check.Util (MyVersion(..), liftTyped, gcatchSafe) where
 
+import           Control.Monad ((>=>))
+import           Control.Exception.Safe
+import           Control.Monad.IO.Class (MonadIO(liftIO))
 import           Data.Maybe
 import           Data.Version
+import           GHC (Ghc, gcatch)
 import           GHC.Exts                   (IsList (fromList), toList)
 import qualified GHC.Paths
 import           Language.Haskell.TH
@@ -30,3 +35,11 @@ liftMyVersion ver = do
 liftTyped :: Lift a => a -> TExpQ a
 liftTyped = unsafeTExpCoerce . lift
 #endif
+
+gcatchSafe :: forall e a . Exception e => Ghc a -> (e -> Ghc a) -> Ghc a
+gcatchSafe act h = act `gcatch` rethrowAsyncExceptions
+  where
+      rethrowAsyncExceptions :: e -> Ghc a
+      rethrowAsyncExceptions e
+        | isAsyncException e = liftIO . throwIO $ e
+        | otherwise = h e
