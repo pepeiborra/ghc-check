@@ -16,7 +16,7 @@ import Data.Maybe (fromMaybe)
 import Data.String (IsString (fromString))
 import Data.Version (Version)
 import GHC
-  ( Ghc,
+  (pkgState,  Ghc,
     getSessionDynFlags,
     runGhc,
     setSessionDynFlags,
@@ -27,13 +27,16 @@ import Maybes (MaybeT (MaybeT), runMaybeT)
 import Module (componentIdToInstalledUnitId)
 import PackageConfig (PackageName (PackageName))
 import Packages
-  ( lookupInstalledPackage,
-    lookupPackageName,
+  (lookupPackage, getPackageDetails, explicitPackages,  lookupInstalledPackage,
+    lookupPackageName
   )
 import Packages (InstalledPackageInfo (..))
 import Packages (PackageConfig)
 import Language.Haskell.TH.Syntax (Lift)
 import Language.Haskell.TH (TExpQ)
+import Data.Foldable (find)
+import Packages (packageNameString)
+import Control.Applicative (Alternative((<|>)))
 
 data PackageVersion
   = PackageVersion
@@ -45,12 +48,23 @@ data PackageVersion
 version :: PackageVersion -> Version
 version PackageVersion{ myVersion = MyVersion v} = v
 
--- | @getPackageVersion p@ returns the version of package @p@ in the package database
+-- | @getPackageVersion p@ returns the version of package @p@ that will be used in the Ghc session.
 getPackageVersion :: String -> Ghc (Maybe PackageVersion)
-getPackageVersion packageName = runMaybeT $ do
+getPackageVersion pName = runMaybeT $ do
   dflags <- Monad.lift getSessionDynFlags
-  component <- MaybeT $ return $ lookupPackageName dflags $ PackageName $ fromString packageName
-  p <- MaybeT $ return $ lookupInstalledPackage dflags (componentIdToInstalledUnitId component)
+  let pkgst   = pkgState dflags
+      depends = explicitPackages pkgst
+
+  let explicit = do
+        pkgs <- traverse (MaybeT . return . lookupPackage dflags) depends
+        MaybeT $ return $ find (\p -> packageNameString p == pName ) pkgs
+
+      notExplicit = do
+        component <- MaybeT $ return $ lookupPackageName dflags $ PackageName $ fromString pName
+        MaybeT $ return $ lookupInstalledPackage dflags (componentIdToInstalledUnitId component)
+
+  p <- explicit <|> notExplicit
+
   return $ mkPackageVersion p
 
 mkPackageVersion :: PackageConfig -> PackageVersion
