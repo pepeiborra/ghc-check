@@ -184,7 +184,7 @@ ghcRunTimeVersion libdir = do
 data CompatibilityGuess
   = ProbablyCompatible {warning :: Maybe String}
   | NotCompatible {reason :: !NotCompatibleReason}
-  deriving Eq
+  deriving (Eq, Show)
 
 data NotCompatibleReason
   = PackageVersionMismatch
@@ -197,7 +197,7 @@ data NotCompatibleReason
         runTimeAbi :: !String,
         compileTime :: !Version
       }
-  deriving Eq
+  deriving (Eq, Show)
 
 -- | Interpret a 'PackageCheckResult' into a yes/no GHC compatibility answer
 guessCompatibility :: PackageCheckResult -> CompatibilityGuess
