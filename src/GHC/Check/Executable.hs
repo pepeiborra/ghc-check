@@ -30,5 +30,6 @@ trim = dropWhileEnd isSpace . dropWhile isSpace
 guessExecutablePathFromLibdir :: FilePath -> NonEmpty FilePath
 guessExecutablePathFromLibdir fp = NonEmpty.fromList
     [ fp </> "bin" </> "ghc"               -- Linux
+    , fp </> ".." </> "bin" </> "ghc"      -- Linux (Relocatable GHC build)
     , fp </> ".." </> "bin" </> "ghc.exe"  -- Windows
     ]
