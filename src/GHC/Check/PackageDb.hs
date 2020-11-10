@@ -8,7 +8,8 @@
 module GHC.Check.PackageDb
   ( PackageVersion(abi), version,
     getPackageVersion,
-  )
+    fromVersionString
+   )
 where
 
 import Control.Monad.Trans.Class as Monad (MonadTrans (lift))
@@ -32,11 +33,12 @@ import Language.Haskell.TH.Syntax (Lift)
 import Data.Foldable (find)
 import Packages (packageNameString)
 import Control.Applicative (Alternative((<|>)))
+import GHC.Stack (HasCallStack)
 
 data PackageVersion
   = PackageVersion
       { myVersion :: !MyVersion,
-        abi :: !String
+        abi :: Maybe String
       }
   deriving (Eq, Lift, Show)
 
@@ -60,7 +62,10 @@ getPackageVersion pName = runMaybeT $ do
 
   p <- explicit <|> notExplicit
 
-  return $ mkPackageVersion p
+  return $ fromPackageConfig p
 
-mkPackageVersion :: PackageConfig -> PackageVersion
-mkPackageVersion p = PackageVersion (MyVersion $ packageVersion p) (abiHash p)
+fromPackageConfig :: PackageConfig -> PackageVersion
+fromPackageConfig p = PackageVersion (MyVersion $ packageVersion p) (Just $ abiHash p)
+
+fromVersionString :: HasCallStack => String -> PackageVersion
+fromVersionString v = PackageVersion (MyVersion $ read v) Nothing

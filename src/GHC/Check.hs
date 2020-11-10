@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP          #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE RecordWildCards #-}
@@ -26,21 +27,22 @@ where
 import Control.Applicative (Alternative ((<|>)))
 import Control.Exception
 import Control.Monad (filterM, unless)
-import Data.Function (on)
-import Data.List (find, intersectBy)
+import Data.List (find)
 import qualified Data.List.NonEmpty as NonEmpty
 import Data.List.NonEmpty (NonEmpty, nonEmpty)
 import qualified Data.Map.Strict as Map
 import Data.Maybe
-import Data.Monoid (First (First), getFirst)
-import Data.Version (Version, showVersion)
-import GHC (Ghc, getSessionDynFlags, runGhc, setSessionDynFlags)
+import Data.Version (Version)
+import GHC (Ghc)
 import GHC.Check.Executable (getGhcVersion, guessExecutablePathFromLibdir)
-import GHC.Check.PackageDb (PackageVersion (..), getPackageVersion, version)
+import GHC.Check.PackageDb (fromVersionString, PackageVersion (..), getPackageVersion, version)
 import GHC.Check.Util (gcatchSafe, liftTyped)
 import Language.Haskell.TH (TExpQ, runIO)
-import Language.Haskell.TH.Syntax (Lift (lift))
 import System.Directory (doesDirectoryExist, doesFileExist)
+
+#if USE_PACKAGE_ABIS
+import GHC (getSessionDynFlags, runGhc, setSessionDynFlags)
+#endif
 
 -- | Given a run-time libdir, checks the ghc installation and returns
 --   a 'Ghc' action to check the package database
@@ -83,11 +85,14 @@ isPackageCheckFailure _ = True
 
 comparePackageVersions :: PackageVersion -> PackageVersion -> PackageCheck
 comparePackageVersions compile run
-  | compile == run = VersionMatch compile
-  | version compile == version run =
-    AbiMismatch (abi compile) (abi run) (version compile)
-  | otherwise =
+  | version compile /= version run =
     VersionMismatch (version compile) (version run)
+  | Just abiCompile <- abi compile
+  , Just abiRun <- abi run
+  , abiCompile /= abiRun
+  = AbiMismatch abiCompile abiRun (version compile)
+  | otherwise
+  = VersionMatch compile
 
 collectPackageVersions :: [String] -> Ghc [(String, PackageVersion)]
 collectPackageVersions =
@@ -147,19 +152,19 @@ checkGhcVersion compileTimeVersions runTimeLibdir = do
 --    >              case guessCompatibility result of ...
 makeGhcVersionChecker :: IO FilePath -> TExpQ GhcVersionChecker
 makeGhcVersionChecker getLibdir = do
-  libdir <- runIO getLibdir
-  libdirExists <- runIO $ doesDirectoryExist libdir
+  compileTimeVersions <- runIO $ compileTimeVersions getLibdir
+  [||checkGhcVersion $$(liftTyped compileTimeVersions)||]
+
+compileTimeVersions :: IO FilePath -> IO [(String, PackageVersion)]
+compileTimeVersions getLibdir = do
+#if USE_PACKAGE_ABIS
+  libdir <- getLibdir
+  libdirExists <- doesDirectoryExist libdir
   unless libdirExists
     $ error
     $ "I could not find a GHC installation at " <> libdir
       <> ". Please do a clean rebuild and/or reinstall GHC."
-  compileTimeVersions <-
-    runIO
-      $ runGhcPkg libdir
-      $ collectPackageVersions trackedPackages
-  [||checkGhcVersion $$(liftTyped compileTimeVersions)||]
-  where
-    trackedPackages = ["ghc", "base"]
+  runGhcPkg libdir $ collectPackageVersions ["ghc", "base"]
 
 runGhcPkg :: FilePath -> Ghc a -> IO a
 runGhcPkg libdir action = runGhc (Just libdir) $ do
@@ -168,6 +173,12 @@ runGhcPkg libdir action = runGhc (Just libdir) $ do
   dflags <- getSessionDynFlags
   _ <- setSessionDynFlags dflags
   action
+#else
+  return
+    [ ("ghc", fromVersionString VERSION_ghc)
+    , ("base", fromVersionString VERSION_base)
+    ]
+#endif
 
 -- | A GHC version retrieved from the GHC installation in the given libdir
 ghcRunTimeVersion :: String -> IO Version

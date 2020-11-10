@@ -12,6 +12,11 @@ maintainer:          pepeiborra@gmail.com
 category:            Development
 extra-source-files:  README.md
 
+flag ghc-check-use-package-abis
+  description: record package abis at compile time for improved precision (requires compile-time TH)
+  default: True
+  manual: True
+
 library
   exposed-modules:     GHC.Check,
                        GHC.Check.Executable
@@ -30,3 +35,5 @@ library
                        transformers
   hs-source-dirs:      src
   default-language:    Haskell2010
+  if flag(ghc-check-use-package-abis)
+    cpp-options: -DUSE_PACKAGE_ABIS

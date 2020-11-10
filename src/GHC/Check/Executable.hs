@@ -4,7 +4,6 @@
 module GHC.Check.Executable where
 
 import Data.Version
-import GHC.Check.Util
 import System.FilePath
 import System.Process
 import Text.ParserCombinators.ReadP
