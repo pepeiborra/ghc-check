@@ -12,28 +12,23 @@ module GHC.Check.PackageDb
 where
 
 import Control.Monad.Trans.Class as Monad (MonadTrans (lift))
-import Data.Maybe (fromMaybe)
 import Data.String (IsString (fromString))
 import Data.Version (Version)
 import GHC
   (pkgState,  Ghc,
     getSessionDynFlags,
-    runGhc,
-    setSessionDynFlags,
   )
 import GHC.Check.Util
-import GHC.Exts (IsList (fromList), toList)
 import Maybes (MaybeT (MaybeT), runMaybeT)
 import Module (componentIdToInstalledUnitId)
 import PackageConfig (PackageName (PackageName))
 import Packages
-  (lookupPackage, getPackageDetails, explicitPackages,  lookupInstalledPackage,
+  (lookupPackage, explicitPackages,  lookupInstalledPackage,
     lookupPackageName
   )
 import Packages (InstalledPackageInfo (..))
 import Packages (PackageConfig)
 import Language.Haskell.TH.Syntax (Lift)
-import Language.Haskell.TH (TExpQ)
 import Data.Foldable (find)
 import Packages (packageNameString)
 import Control.Applicative (Alternative((<|>)))
