@@ -35,13 +35,15 @@ import Data.Maybe
 import Data.Version (Version)
 import GHC (Ghc)
 import GHC.Check.Executable (getGhcVersion, guessExecutablePathFromLibdir)
-import GHC.Check.PackageDb (fromVersionString, PackageVersion (..), getPackageVersion, version)
+import GHC.Check.PackageDb (PackageVersion (..), getPackageVersion, version)
 import GHC.Check.Util (gcatchSafe, liftTyped)
 import Language.Haskell.TH (TExpQ, runIO)
 import System.Directory (doesDirectoryExist, doesFileExist)
 
 #if USE_PACKAGE_ABIS
 import GHC (getSessionDynFlags, runGhc, setSessionDynFlags)
+#else
+import GHC.Check.PackageDb (fromVersionString)
 #endif
 
 -- | Given a run-time libdir, checks the ghc installation and returns
