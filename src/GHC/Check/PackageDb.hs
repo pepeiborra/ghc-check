@@ -68,4 +68,4 @@ fromPackageConfig :: PackageConfig -> PackageVersion
 fromPackageConfig p = PackageVersion (MyVersion $ packageVersion p) (Just $ abiHash p)
 
 fromVersionString :: HasCallStack => String -> PackageVersion
-fromVersionString v = PackageVersion (MyVersion $ read v) Nothing
+fromVersionString v = PackageVersion (read v) Nothing
