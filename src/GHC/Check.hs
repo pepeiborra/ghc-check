@@ -37,7 +37,8 @@ import GHC (Ghc)
 import GHC.Check.Executable (getGhcVersion, guessExecutablePathFromLibdir)
 import GHC.Check.PackageDb (fromVersionString, PackageVersion (..), getPackageVersion, version)
 import GHC.Check.Util (gcatchSafe, liftTyped)
-import Language.Haskell.TH (TExpQ, runIO)
+import Language.Haskell.TH as TH (TExpQ, runIO)
+import qualified Language.Haskell.TH as TH
 import System.Directory (doesDirectoryExist, doesFileExist)
 
 #if USE_PACKAGE_ABIS
@@ -153,7 +154,11 @@ checkGhcVersion compileTimeVersions runTimeLibdir = do
 makeGhcVersionChecker :: IO FilePath -> TExpQ GhcVersionChecker
 makeGhcVersionChecker getLibdir = do
   compileTimeVersions <- runIO $ compileTimeVersions getLibdir
+#if MIN_VERSION_template_haskell(2,17,0)
+  TH.examineCode [||checkGhcVersion $$(liftTyped compileTimeVersions)||]
+#else
   [||checkGhcVersion $$(liftTyped compileTimeVersions)||]
+#endif
 
 compileTimeVersions :: IO FilePath -> IO [(String, PackageVersion)]
 compileTimeVersions getLibdir = do

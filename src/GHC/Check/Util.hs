@@ -4,10 +4,11 @@
 {-# LANGUAGE CPP, TemplateHaskell #-}
 module GHC.Check.Util (MyVersion(..), liftTyped, gcatchSafe) where
 
-import           Control.Exception.Safe
+import           Control.Exception.Safe as Safe
 import           Control.Monad.IO.Class (MonadIO(liftIO))
 import           Data.Version ( Version, parseVersion )
-import           GHC (Ghc, gcatch)
+import           GHC (Ghc)
+import qualified GHC
 import           GHC.Exts                   (IsList (fromList), toList)
 import           Language.Haskell.TH ( TExpQ )
 import           Language.Haskell.TH.Syntax as TH
@@ -20,16 +21,25 @@ newtype MyVersion = MyVersion Version
 instance Lift MyVersion where
 #if MIN_VERSION_template_haskell(2,16,0)
     liftTyped = liftMyVersion
-#endif
+#else
     lift = unTypeQ . liftMyVersion
+#endif
+    -- lift = unTypeCode . liftMyVersion
 
 instance Read MyVersion where
   readPrec = Read.lift $ MyVersion <$> parseVersion
 
+#if MIN_VERSION_template_haskell(2,17,0)
+liftMyVersion :: (Quote m) => MyVersion -> Code m MyVersion
+liftMyVersion ver = Code $ do
+    verLifted <- TH.lift (toList ver)
+    TH.examineCode [|| fromList $$( TH.Code . pure $ TExp verLifted)||]
+#else
 liftMyVersion :: MyVersion -> TExpQ MyVersion
 liftMyVersion ver = do
     verLifted <- TH.lift (toList ver)
     [|| fromList $$(pure $ TExp verLifted) ||]
+#endif
 
 #if !MIN_VERSION_template_haskell(2,16,0)
 liftTyped :: Lift a => a -> TExpQ a
@@ -37,9 +47,13 @@ liftTyped = unsafeTExpCoerce . lift
 #endif
 
 gcatchSafe :: forall e a . Exception e => Ghc a -> (e -> Ghc a) -> Ghc a
-gcatchSafe act h = act `gcatch` rethrowAsyncExceptions
+#if MIN_VERSION_ghc(9,0,1)
+gcatchSafe = Safe.catch
+#else
+gcatchSafe act h = act `GHC.gcatch` rethrowAsyncExceptions
   where
       rethrowAsyncExceptions :: e -> Ghc a
       rethrowAsyncExceptions e
         | isAsyncException e = liftIO . throwIO $ e
         | otherwise = h e
+#endif
