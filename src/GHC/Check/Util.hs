@@ -12,6 +12,7 @@ import qualified GHC
 import           GHC.Exts                   (IsList (fromList), toList)
 import           Language.Haskell.TH ( TExpQ )
 import           Language.Haskell.TH.Syntax as TH
+import           Language.Haskell.TH.Syntax.Compat
 import qualified Text.Read as Read
 
 -- | A wrapper around 'Version' with TH lifting
@@ -30,16 +31,14 @@ instance Read MyVersion where
   readPrec = Read.lift $ MyVersion <$> parseVersion
 
 #if MIN_VERSION_template_haskell(2,17,0)
-liftMyVersion :: (Quote m) => MyVersion -> Code m MyVersion
-liftMyVersion ver = Code $ do
-    verLifted <- TH.lift (toList ver)
-    TH.examineCode [|| fromList $$( TH.Code . pure $ TExp verLifted)||]
+liftMyVersion :: (Quote m) => MyVersion -> Splice m MyVersion
 #else
 liftMyVersion :: MyVersion -> TExpQ MyVersion
-liftMyVersion ver = do
-    verLifted <- TH.lift (toList ver)
-    [|| fromList $$(pure $ TExp verLifted) ||]
 #endif
+liftMyVersion ver = liftSplice $ do
+    verLifted <- liftQuote (toList ver)
+    examineSplice [|| fromList $$( liftSplice . pure $ TExp verLifted)||]
+
 
 #if !MIN_VERSION_template_haskell(2,16,0)
 liftTyped :: Lift a => a -> TExpQ a

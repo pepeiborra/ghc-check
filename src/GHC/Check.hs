@@ -38,6 +38,7 @@ import GHC.Check.Executable (getGhcVersion, guessExecutablePathFromLibdir)
 import GHC.Check.PackageDb (fromVersionString, PackageVersion (..), getPackageVersion, version)
 import GHC.Check.Util (gcatchSafe, liftTyped)
 import qualified Language.Haskell.TH as TH
+import Language.Haskell.TH.Syntax.Compat (examineSplice, liftSplice, SpliceQ)
 import System.Directory (doesDirectoryExist, doesFileExist)
 
 #if USE_PACKAGE_ABIS
@@ -150,23 +151,11 @@ checkGhcVersion compileTimeVersions runTimeLibdir = do
 --    >              setupGhcApi
 --    >              result <- packageCheck
 --    >              case guessCompatibility result of ...
-makeGhcVersionChecker :: IO FilePath -> CodeQ GhcVersionChecker
-makeGhcVersionChecker getLibdir = liftCode $ do
+makeGhcVersionChecker :: IO FilePath -> SpliceQ GhcVersionChecker
+makeGhcVersionChecker getLibdir = liftSplice $ do
   compileTimeVersions <- TH.runIO $ compileTimeVersions getLibdir
-  examineCode [||checkGhcVersion $$(liftTyped compileTimeVersions)||]
+  examineSplice [||checkGhcVersion $$(liftTyped compileTimeVersions)||]
 
--- Compatability layer
-liftCode :: TH.TExpQ a -> CodeQ a
-examineCode :: CodeQ a -> TH.TExpQ a
-#if MIN_VERSION_template_haskell(2,17,0)
-type CodeQ = TH.CodeQ
-liftCode = TH.liftCode
-examineCode = TH.examineCode
-#else
-type CodeQ x = TH.TExpQ x
-liftCode = id
-examineCode = id
-#endif
 
 compileTimeVersions :: IO FilePath -> IO [(String, PackageVersion)]
 compileTimeVersions getLibdir = do
