@@ -35,7 +35,7 @@ import Data.Maybe
 import Data.Version (Version)
 import GHC (Ghc)
 import GHC.Check.Executable (getGhcVersion, guessExecutablePathFromLibdir)
-import GHC.Check.PackageDb (fromVersionString, PackageVersion (..), getPackageVersion, version)
+import GHC.Check.PackageDb (PackageVersion (..), getPackageVersion, version)
 import GHC.Check.Util (gcatchSafe, liftTyped)
 import qualified Language.Haskell.TH as TH
 import Language.Haskell.TH.Syntax.Compat (examineSplice, liftSplice, SpliceQ)
@@ -81,6 +81,7 @@ data PackageCheck
     -- ^ Same version and abi
   deriving (Eq, Show)
 
+isPackageCheckFailure :: PackageCheck -> Bool
 isPackageCheckFailure VersionMatch {} = False
 isPackageCheckFailure _ = True
 
@@ -153,12 +154,12 @@ checkGhcVersion compileTimeVersions runTimeLibdir = do
 --    >              case guessCompatibility result of ...
 makeGhcVersionChecker :: IO FilePath -> SpliceQ GhcVersionChecker
 makeGhcVersionChecker getLibdir = liftSplice $ do
-  compileTimeVersions <- TH.runIO $ compileTimeVersions getLibdir
+  compileTimeVersions <- TH.runIO $ getCompileTimeVersions getLibdir
   examineSplice [||checkGhcVersion $$(liftTyped compileTimeVersions)||]
 
 
-compileTimeVersions :: IO FilePath -> IO [(String, PackageVersion)]
-compileTimeVersions getLibdir = do
+getCompileTimeVersions :: IO FilePath -> IO [(String, PackageVersion)]
+getCompileTimeVersions getLibdir = do
 #if USE_PACKAGE_ABIS
   libdir <- getLibdir
   libdirExists <- doesDirectoryExist libdir
