@@ -51,7 +51,7 @@ import Packages
   (lookupPackage, explicitPackages,  lookupInstalledPackage,
     lookupPackageName
   )
-import Packages (InstalledPackageInfo (..))
+import Packages (InstalledPackageInfo (packageVersion, abiHash))
 import Packages (PackageConfig)
 import Packages (packageNameString)
 #endif
