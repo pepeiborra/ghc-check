@@ -1,4 +1,6 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DeriveLift #-}
+{-# OPTIONS_GHC -Wall #-}
 -- | Discover the GHC version via the package database. Requirements:
 --
 --     * the package database must be compatible, which is usually not the case
@@ -8,45 +10,82 @@
 module GHC.Check.PackageDb
   ( PackageVersion(abi), version,
     getPackageVersion,
-  )
+    fromVersionString
+   )
 where
 
 import Control.Monad.Trans.Class as Monad (MonadTrans (lift))
-import Data.Maybe (fromMaybe)
 import Data.String (IsString (fromString))
 import Data.Version (Version)
+import Language.Haskell.TH.Syntax (Lift)
+import Data.Foldable (find)
+import Control.Applicative (Alternative((<|>)))
+#if MIN_VERSION_ghc(9,0,1)
+import GHC
+  (unitState,  Ghc,
+    getSessionDynFlags,
+  )
+import GHC.Data.Maybe (MaybeT (MaybeT), runMaybeT)
+import GHC.Unit.Info (PackageName (PackageName))
+import GHC.Unit.State
+  (lookupUnit, explicitUnits,  lookupUnitId,
+    lookupPackageName, GenericUnitInfo (..), 
+    UnitInfo, unitPackageNameString)
+import GHC.Unit.Types (indefUnit)
+#else
 import GHC
   (pkgState,  Ghc,
     getSessionDynFlags,
-    runGhc,
-    setSessionDynFlags,
   )
-import GHC.Check.Util
-import GHC.Exts (IsList (fromList), toList)
 import Maybes (MaybeT (MaybeT), runMaybeT)
 import Module (componentIdToInstalledUnitId)
 import PackageConfig (PackageName (PackageName))
 import Packages
-  (lookupPackage, getPackageDetails, explicitPackages,  lookupInstalledPackage,
+  (lookupPackage, explicitPackages,  lookupInstalledPackage,
     lookupPackageName
   )
-import Packages (InstalledPackageInfo (..))
+import Packages (InstalledPackageInfo (packageVersion, abiHash))
 import Packages (PackageConfig)
-import Language.Haskell.TH.Syntax (Lift)
-import Language.Haskell.TH (TExpQ)
-import Data.Foldable (find)
 import Packages (packageNameString)
-import Control.Applicative (Alternative((<|>)))
+#endif
+import GHC.Stack (HasCallStack)
+
+import GHC.Check.Util
 
 data PackageVersion
   = PackageVersion
       { myVersion :: !MyVersion,
-        abi :: !String
+        abi :: Maybe String
       }
   deriving (Eq, Lift, Show)
 
 version :: PackageVersion -> Version
 version PackageVersion{ myVersion = MyVersion v} = v
+
+#if MIN_VERSION_ghc(9,0,1)
+-- | @getPackageVersion p@ returns the version of package @p@ that will be used in the Ghc session.
+getPackageVersion :: String -> Ghc (Maybe PackageVersion)
+getPackageVersion pName = runMaybeT $ do
+  dflags <- Monad.lift getSessionDynFlags
+  let pkgst   = unitState dflags
+      depends = explicitUnits pkgst
+
+  let explicit = do
+        pkgs <- traverse (MaybeT . return . lookupUnit pkgst) depends
+        MaybeT $ return $ find (\p -> unitPackageNameString p == pName ) pkgs
+
+      notExplicit = do
+        component <- MaybeT $ return $ lookupPackageName pkgst $ PackageName $ fromString pName
+        MaybeT $ return $ lookupUnitId pkgst (indefUnit component)
+
+  p <- explicit <|> notExplicit
+
+  return $ fromPackageConfig p
+
+fromPackageConfig :: UnitInfo -> PackageVersion
+fromPackageConfig p = PackageVersion (MyVersion $ unitPackageVersion p) (Just $ unitAbiHash p)
+
+#else
 
 -- | @getPackageVersion p@ returns the version of package @p@ that will be used in the Ghc session.
 getPackageVersion :: String -> Ghc (Maybe PackageVersion)
@@ -65,7 +104,11 @@ getPackageVersion pName = runMaybeT $ do
 
   p <- explicit <|> notExplicit
 
-  return $ mkPackageVersion p
+  return $ fromPackageConfig p
 
-mkPackageVersion :: PackageConfig -> PackageVersion
-mkPackageVersion p = PackageVersion (MyVersion $ packageVersion p) (abiHash p)
+fromPackageConfig :: PackageConfig -> PackageVersion
+fromPackageConfig p = PackageVersion (MyVersion $ packageVersion p) (Just $ abiHash p)
+#endif
+
+fromVersionString :: HasCallStack => String -> PackageVersion
+fromVersionString v = PackageVersion (MyVersion $ read v) Nothing
