@@ -20,6 +20,9 @@ jobs:
           - "8.8.4"
           - "8.10.4"
           - "9.0.1"
+        flags:
+          - "ghc-check-use-package-abis"
+          - "-ghc-check-use-package-abis"
         exclude:
           - os: macOS-latest
             ghc: 9.0.1
@@ -54,7 +57,7 @@ jobs:
     - name: Build
       run: |
         cabal update
-        cabal build all --enable-tests --enable-benchmarks --write-ghc-environment-files=always
+        cabal build all --enable-tests --enable-benchmarks --write-ghc-environment-files=always -f ${{ matrix.flags }}
 
     - name: Test
       run: |
