@@ -32,7 +32,7 @@ import qualified Data.List.NonEmpty as NonEmpty
 import Data.List.NonEmpty (NonEmpty, nonEmpty)
 import qualified Data.Map.Strict as Map
 import Data.Maybe
-import Data.Version (Version)
+import Data.Version (versionBranch, Version)
 import GHC (Ghc)
 import GHC.Check.Executable (getGhcVersion, guessExecutablePathFromLibdir)
 import GHC.Check.PackageDb (PackageVersion (..), getPackageVersion, version)
@@ -103,6 +103,14 @@ collectPackageVersions =
   fmap catMaybes . mapM (\p -> fmap (p,) <$> getPackageVersion p)
 
 -- | Checks if the run-time version of the @ghc@ package matches the given version.
+--
+-- If the package database contains an unstable ghc library version,
+-- we omit the package version check.
+-- This leads to a more convenient usage for working on GHC.
+-- When developing for or on GHC, you can compile GHC HEAD with a bootstrap compiler and
+-- use the freshly compiled ghc library to load programs that use the latest GHC API.
+-- We consider the ghc version to be unstable according to the
+-- <https://downloads.haskell.org/~ghc/8.10.1/docs/html/users_guide/intro.html#ghc-version-numbering-policy GHC User Guide>
 checkGhcVersion ::
   [(String, PackageVersion)] ->
   GhcVersionChecker
@@ -125,15 +133,26 @@ checkGhcVersion compileTimeVersions runTimeLibdir = do
             $ do
               runTimeVersions <- collectPackageVersions (map fst compileTimeVersions)
               let compares =
-                    Map.intersectionWith
-                      comparePackageVersions
-                      compileTimeVersionsMap
-                      (Map.fromList runTimeVersions)
+                    if isUnstableGhcVersion (lookup "ghc" runTimeVersions)
+                      then Map.empty
+                      else Map.intersectionWith
+                            comparePackageVersions
+                            compileTimeVersionsMap
+                            (Map.fromList runTimeVersions)
                   failure = PackageCheckFailure <$> nonEmpty (Map.toList $ Map.filter isPackageCheckFailure compares)
                   success = PackageCheckSuccess <$> nonEmpty (Map.toList compares)
                   inconclusive = PackageCheckInconclusive (map fst compileTimeVersions)
 
               return $ fromMaybe inconclusive (failure <|> success)
+  where
+    -- | The ghc library version is unstable, if it has
+    -- at least the form <x.y> and 'y' is odd.
+    isUnstableGhcVersion :: Maybe PackageVersion -> Bool
+    isUnstableGhcVersion Nothing = False
+    isUnstableGhcVersion (Just ver) =
+      case versionBranch (version ver) of
+        (_: major: _minors) -> odd major
+        _ -> False
 
 -- | @makeGhcVersionChecker libdir@ returns a function to check the run-time
 --   version of GHC against the compile-time version. It performs two checks:
