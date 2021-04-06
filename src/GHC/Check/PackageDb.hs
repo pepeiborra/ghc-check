@@ -26,19 +26,12 @@ import GHC
     getSessionDynFlags,
   )
 import GHC.Data.Maybe (MaybeT (MaybeT), runMaybeT)
--- import GHC.Unit.Module (toUnitId)
 import GHC.Unit.Info (PackageName (PackageName))
 import GHC.Unit.State
   (lookupUnit, explicitUnits,  lookupUnitId,
-    lookupPackageName
-  )
-import GHC.Unit.State (GenericUnitInfo (..))
-import GHC.Unit.State (UnitInfo)
-import GHC.Unit.State (unitPackageNameString)
+    lookupPackageName, GenericUnitInfo (..), 
+    UnitInfo, unitPackageNameString)
 import GHC.Unit.Types (indefUnit)
--- import GHC.Unit.Types (Unit, UnitId)
--- import GHC.Driver.Session (DynFlags)
--- import GHC.Unit.State (UnitState)
 #else
 import GHC
   (pkgState,  Ghc,
