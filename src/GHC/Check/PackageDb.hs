@@ -29,7 +29,7 @@ import GHC.Data.Maybe (MaybeT (MaybeT), runMaybeT)
 import GHC.Unit.Info (PackageName (PackageName))
 import GHC.Unit.State
   (lookupUnit, explicitUnits,  lookupUnitId,
-    lookupPackageName, GenericUnitInfo (..), 
+    lookupPackageName, GenericUnitInfo (..),
     UnitInfo, unitPackageNameString)
 import GHC.Unit.Types (indefUnit)
 #else
@@ -111,4 +111,4 @@ fromPackageConfig p = PackageVersion (MyVersion $ packageVersion p) (Just $ abiH
 #endif
 
 fromVersionString :: HasCallStack => String -> PackageVersion
-fromVersionString v = PackageVersion (MyVersion $ read v) Nothing
+fromVersionString v = PackageVersion (read v) Nothing
