@@ -20,7 +20,22 @@ import Data.Version (Version)
 import Language.Haskell.TH.Syntax (Lift)
 import Data.Foldable (find)
 import Control.Applicative (Alternative((<|>)))
-#if MIN_VERSION_ghc(9,0,1)
+#if MIN_VERSION_ghc(9,2,0)
+import GHC
+  (Ghc,
+    getSession,
+  )
+import GHC.Data.Maybe (MaybeT (MaybeT), runMaybeT)
+import qualified GHC.Data.ShortText as ShortText
+import GHC.Driver.Env (hsc_unit_env, )
+import GHC.Unit.Info (PackageName (PackageName))
+import GHC.Unit.Env (ue_units)
+import GHC.Unit.State
+  (lookupUnit, explicitUnits,  lookupUnitId,
+    lookupPackageName, GenericUnitInfo (..),
+    UnitInfo, unitPackageNameString)
+import GHC.Unit.Types (indefUnit)
+#elif MIN_VERSION_ghc(9,0,1)
 import GHC
   (unitState,  Ghc,
     getSessionDynFlags,
@@ -62,7 +77,30 @@ data PackageVersion
 version :: PackageVersion -> Version
 version PackageVersion{ myVersion = MyVersion v} = v
 
-#if MIN_VERSION_ghc(9,0,1)
+#if MIN_VERSION_ghc(9,2,0)
+-- | @getPackageVersion p@ returns the version of package @p@ that will be used in the Ghc session.
+getPackageVersion :: String -> Ghc (Maybe PackageVersion)
+getPackageVersion pName = runMaybeT $ do
+  hsc_env <- Monad.lift getSession
+  let pkgst   = ue_units $ hsc_unit_env hsc_env
+      depends = explicitUnits pkgst
+
+  let explicit = do
+        pkgs <- traverse (MaybeT . return . lookupUnit pkgst) depends
+        MaybeT $ return $ find (\p -> unitPackageNameString p == pName ) pkgs
+
+      notExplicit = do
+        component <- MaybeT $ return $ lookupPackageName pkgst $ PackageName $ fromString pName
+        MaybeT $ return $ lookupUnitId pkgst (indefUnit component)
+
+  p <- explicit <|> notExplicit
+
+  return $ fromPackageConfig p
+
+fromPackageConfig :: UnitInfo -> PackageVersion
+fromPackageConfig p = PackageVersion (MyVersion $ unitPackageVersion p) (Just $ ShortText.unpack $ unitAbiHash p)
+
+#elif MIN_VERSION_ghc(9,0,1)
 -- | @getPackageVersion p@ returns the version of package @p@ that will be used in the Ghc session.
 getPackageVersion :: String -> Ghc (Maybe PackageVersion)
 getPackageVersion pName = runMaybeT $ do

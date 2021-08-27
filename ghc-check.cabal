@@ -34,6 +34,9 @@ library
                        template-haskell,
                        th-compat >= 0.1.2,
                        transformers
+  if impl(ghc >= 9.2)
+      -- We need access to ShortText
+      build-depends: ghc-boot
   hs-source-dirs:      src
   ghc-options:         -Wall
   default-language:    Haskell2010
