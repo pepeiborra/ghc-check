@@ -20,6 +20,8 @@ jobs:
           - "8.8.4"
           - "8.10.4"
           - "9.0.1"
+          - "9.2.4"
+          - "9.4.1"
         flags:
           - "ghc-check-use-package-abis"
           - "-ghc-check-use-package-abis"
