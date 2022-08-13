@@ -1,10 +1,10 @@
-{-# LANGUAGE CPP          #-}
-{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE BangPatterns          #-}
+{-# LANGUAGE CPP                   #-}
 {-# LANGUAGE DuplicateRecordFields #-}
-{-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE TupleSections #-}
-{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE RecordWildCards       #-}
+{-# LANGUAGE TemplateHaskell       #-}
+{-# LANGUAGE TupleSections         #-}
+{-# LANGUAGE TypeApplications      #-}
 
 module GHC.Check
   ( -- * GHC version check
@@ -24,28 +24,29 @@ module GHC.Check
   )
 where
 
-import Control.Applicative (Alternative ((<|>)))
-import Control.Exception
-import Control.Monad (filterM, unless)
-import Data.List (find)
-import qualified Data.List.NonEmpty as NonEmpty
-import Data.List.NonEmpty (NonEmpty, nonEmpty)
-import qualified Data.Map.Strict as Map
-import Data.Maybe
-import Data.Version (versionBranch, Version)
-import GHC (Ghc)
-import GHC.Check.Executable (getGhcVersion, guessExecutablePathFromLibdir)
-import GHC.Check.PackageDb (PackageVersion (..), getPackageVersion, version)
-import GHC.Check.Util (gcatchSafe, liftTyped)
-import qualified Language.Haskell.TH as TH
-import Language.Haskell.TH.Syntax.Compat (examineSplice, liftSplice, SpliceQ)
-import System.Directory (doesDirectoryExist, doesFileExist)
-
-#if USE_PACKAGE_ABIS
-import GHC (getSessionDynFlags, runGhc, setSessionDynFlags)
-#else
-import GHC.Check.PackageDb (fromVersionString)
-#endif
+import           Control.Applicative               (Alternative ((<|>)))
+import           Control.Exception
+import           Control.Monad                     (filterM, unless)
+import           Data.List                         (find)
+import           Data.List.NonEmpty                (NonEmpty, nonEmpty)
+import qualified Data.List.NonEmpty                as NonEmpty
+import qualified Data.Map.Strict                   as Map
+import           Data.Maybe
+import           Data.Version                      (Version, versionBranch)
+import           GHC                               (Ghc, getSessionDynFlags,
+                                                    runGhc, setSessionDynFlags)
+import           GHC.Check.Executable              (getGhcVersion,
+                                                    guessExecutablePathFromLibdir)
+import           GHC.Check.PackageDb               (PackageVersion (..),
+                                                    fromVersionString,
+                                                    getPackageVersion, version)
+import           GHC.Check.Util                    (gcatchSafe, liftTyped)
+import           GHC.Stack                         (HasCallStack)
+import qualified Language.Haskell.TH               as TH
+import           Language.Haskell.TH.Syntax.Compat (SpliceQ, examineSplice,
+                                                    liftSplice)
+import           System.Directory                  (doesDirectoryExist,
+                                                    doesFileExist)
 
 -- | Given a run-time libdir, checks the ghc installation and returns
 --   a 'Ghc' action to check the package database
@@ -55,7 +56,7 @@ data InstallationCheck
   = -- | The GHC installation looks fine. Further checks are needed for the package libraries.
     InstallationChecked
       { -- | The compile time version of GHC
-        compileTime :: !Version,
+        compileTime  :: !Version,
         -- | The second stage of the GHC version check
         packageCheck :: Ghc PackageCheckResult
       }
@@ -85,7 +86,7 @@ data PackageCheck
 
 isPackageCheckFailure :: PackageCheck -> Bool
 isPackageCheckFailure VersionMatch {} = False
-isPackageCheckFailure _ = True
+isPackageCheckFailure _               = True
 
 comparePackageVersions :: PackageVersion -> PackageVersion -> PackageCheck
 comparePackageVersions compile run
@@ -111,7 +112,7 @@ collectPackageVersions =
 -- use the freshly compiled ghc library to load programs that use the latest GHC API.
 -- We consider the ghc version to be unstable according to the
 -- <https://downloads.haskell.org/~ghc/8.10.1/docs/html/users_guide/intro.html#ghc-version-numbering-policy GHC User Guide>
-checkGhcVersion ::
+checkGhcVersion :: HasCallStack =>
   [(String, PackageVersion)] ->
   GhcVersionChecker
 checkGhcVersion compileTimeVersions runTimeLibdir = do
@@ -152,7 +153,7 @@ checkGhcVersion compileTimeVersions runTimeLibdir = do
     isUnstableGhcVersion (Just ver) =
       case versionBranch (version ver) of
         (_: major: _minors) -> odd major
-        _ -> False
+        _                   -> False
 
 -- | @makeGhcVersionChecker libdir@ returns a function to check the run-time
 --   version of GHC against the compile-time version. It performs two checks:
@@ -178,17 +179,30 @@ makeGhcVersionChecker getLibdir = liftSplice $ do
   compileTimeVersions <- TH.runIO $ getCompileTimeVersions getLibdir
   examineSplice [||checkGhcVersion $$(liftTyped compileTimeVersions)||]
 
+usePackageAbis :: Bool
+#if USE_PACKAGE_ABIS
+usePackageAbis = True
+#else
+usePackageAbis = False
+#endif
 
 getCompileTimeVersions :: IO FilePath -> IO [(String, PackageVersion)]
-getCompileTimeVersions getLibdir = do
-#if USE_PACKAGE_ABIS
-  libdir <- getLibdir
-  libdirExists <- doesDirectoryExist libdir
-  unless libdirExists
-    $ error
-    $ "I could not find a GHC installation at " <> libdir
-      <> ". Please do a clean rebuild and/or reinstall GHC."
-  runGhcPkg libdir $ collectPackageVersions ["ghc", "base"]
+getCompileTimeVersions getLibdir =
+  if usePackageAbis then do
+    libdir <- getLibdir
+    libdirExists <- doesDirectoryExist libdir
+    unless libdirExists
+      $ error
+      $ "I could not find a GHC installation at " <> libdir
+        <> ". Please do a clean rebuild and/or reinstall GHC."
+    packageVersions <- runGhcPkg libdir $ collectPackageVersions ["ghc", "base"]
+    pure $ maybe compileTimeVerionsFromCpp (const packageVersions) $ find ((== "ghc") . fst) packageVersions
+  else pure compileTimeVerionsFromCpp
+  where
+    compileTimeVerionsFromCpp =
+      [ ("ghc", fromVersionString VERSION_ghc)
+      , ("base", fromVersionString VERSION_base)
+      ]
 
 runGhcPkg :: FilePath -> Ghc a -> IO a
 runGhcPkg libdir action = runGhc (Just libdir) $ do
@@ -197,12 +211,6 @@ runGhcPkg libdir action = runGhc (Just libdir) $ do
   dflags <- getSessionDynFlags
   _ <- setSessionDynFlags dflags
   action
-#else
-  return
-    [ ("ghc", fromVersionString VERSION_ghc)
-    , ("base", fromVersionString VERSION_base)
-    ]
-#endif
 
 -- | A GHC version retrieved from the GHC installation in the given libdir
 ghcRunTimeVersion :: String -> IO Version
@@ -224,13 +232,13 @@ data CompatibilityGuess
 data NotCompatibleReason
   = PackageVersionMismatch
       { compileTime :: !Version,
-        runTime :: !Version,
+        runTime     :: !Version,
         packageName :: !String
       }
   | BasePackageAbiMismatch
       { compileTimeAbi :: !String,
-        runTimeAbi :: !String,
-        compileTime :: !Version
+        runTimeAbi     :: !String,
+        compileTime    :: !Version
       }
   deriving (Eq, Show)
 
