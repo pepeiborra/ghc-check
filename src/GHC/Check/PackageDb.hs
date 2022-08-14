@@ -34,7 +34,9 @@ import GHC.Unit.State
   (lookupUnit, explicitUnits,  lookupUnitId,
     lookupPackageName, GenericUnitInfo (..),
     UnitInfo, unitPackageNameString)
+#if !MIN_VERSION_ghc(9,4,0)
 import GHC.Unit.Types (indefUnit)
+#endif
 #elif MIN_VERSION_ghc(9,0,1)
 import GHC
   (unitState,  Ghc,
@@ -77,13 +79,22 @@ data PackageVersion
 version :: PackageVersion -> Version
 version PackageVersion{ myVersion = MyVersion v} = v
 
+#if MIN_VERSION_ghc(9,4,0)
+indefUnit :: a -> a
+indefUnit = id
+#endif
+
 #if MIN_VERSION_ghc(9,2,0)
 -- | @getPackageVersion p@ returns the version of package @p@ that will be used in the Ghc session.
 getPackageVersion :: String -> Ghc (Maybe PackageVersion)
 getPackageVersion pName = runMaybeT $ do
   hsc_env <- Monad.lift getSession
   let pkgst   = ue_units $ hsc_unit_env hsc_env
-      depends = explicitUnits pkgst
+      depends =
+#if MIN_VERSION_ghc(9,4,0)
+        map fst $
+#endif
+        explicitUnits pkgst
 
   let explicit = do
         pkgs <- traverse (MaybeT . return . lookupUnit pkgst) depends
