@@ -1,7 +1,7 @@
 cabal-version:       1.20
 build-type:          Simple
 name:                ghc-check
-version:             0.5.0.7
+version:             0.5.0.8
 synopsis:            detect mismatches between compile-time and run-time versions of the ghc api
 description:         detect mismatches between compile-time and run-time versions of the ghc api
 bug-reports:         https://github.com/pepeiborra/ghc-check/issues
@@ -11,6 +11,8 @@ author:              Pepe Iborra
 maintainer:          pepeiborra@gmail.com
 category:            Development
 extra-source-files:  README.md
+tested-with:         GHC == 8.6.5 || == 8.8.4 || == 8.10.7 || == 9.0.2 || == 9.2.3 || == 9.2.4 || == 9.4.1
+
 
 flag ghc-check-use-package-abis
   description: record package abis at compile time for improved precision (requires compile-time TH)
